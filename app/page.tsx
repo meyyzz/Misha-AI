@@ -2,6 +2,8 @@
 "use client";
 
 import { useState, useRef, useEffect, type ReactNode, type ChangeEvent, type KeyboardEvent, type MouseEvent } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "../lib/AuthContext";
 
 type Role = "user" | "assistant";
 
@@ -251,6 +253,17 @@ function FileIcon() {
   );
 }
 
+function MicIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3Z" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+      <line x1="12" y1="19" x2="12" y2="23" />
+      <line x1="8" y1="23" x2="16" y2="23" />
+    </svg>
+  );
+}
+
 function PlusIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -265,6 +278,33 @@ function RegenerateIcon() {
       <path d="M23 4v6h-6" />
       <path d="M1 20v-6h6" />
       <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+    </svg>
+  );
+}
+
+function SunIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+    </svg>
+  );
+}
+
+function MoonIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z" />
+    </svg>
+  );
+}
+
+function LogoutIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+      <path d="M16 17l5-5-5-5" />
+      <path d="M21 12H9" />
     </svg>
   );
 }
@@ -286,6 +326,9 @@ function ChevronIcon({ open }: { open: boolean }) {
 }
 
 export default function Home() {
+  const router = useRouter();
+  const { user, loading: authLoading, logout } = useAuth();
+
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [input, setInput] = useState("");
@@ -299,13 +342,94 @@ export default function Home() {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [editingText, setEditingText] = useState("");
   const [initializing, setInitializing] = useState(true);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const docInputRef = useRef<HTMLInputElement>(null);
+  const recognitionRef = useRef<any>(null);
+  const [isListening, setIsListening] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(true);
+
+  // Redirect ke /login kalau belum login
+  useEffect(() => {
+    if (!authLoading && !user) {
+      router.push("/login");
+    }
+  }, [authLoading, user, router]);
+
+  // Load preferensi tema (localStorage, fallback ke preferensi sistem)
+  useEffect(() => {
+    const saved = localStorage.getItem("misha-ai-theme");
+    const initial =
+      saved === "dark" || saved === "light"
+        ? saved
+        : window.matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light";
+    setTheme(initial);
+    document.documentElement.setAttribute("data-theme", initial);
+  }, []);
+
+  function toggleTheme() {
+    const next = theme === "light" ? "dark" : "light";
+    setTheme(next);
+    document.documentElement.setAttribute("data-theme", next);
+    localStorage.setItem("misha-ai-theme", next);
+  }
+
+  // ===== Voice input (Web Speech API bawaan browser) =====
+  useEffect(() => {
+    const SpeechRecognitionCtor =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognitionCtor) {
+      setSpeechSupported(false);
+      return;
+    }
+
+    const recognition = new SpeechRecognitionCtor();
+    recognition.lang = "id-ID";
+    recognition.continuous = false;
+    recognition.interimResults = false;
+
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      setInput((prev) => (prev ? `${prev} ${transcript}` : transcript).slice(0, MAX_INPUT_CHARS));
+    };
+
+    recognition.onerror = () => {
+      setIsListening(false);
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognitionRef.current = recognition;
+  }, []);
+
+  function toggleVoiceInput() {
+    if (!speechSupported || !recognitionRef.current) return;
+
+    if (isListening) {
+      recognitionRef.current.stop();
+      setIsListening(false);
+    } else {
+      try {
+        recognitionRef.current.start();
+        setIsListening(true);
+      } catch {
+        setIsListening(false);
+      }
+    }
+  }
+
+  const storageKey = user ? `${STORAGE_KEY}-${user.uid}` : null;
 
   useEffect(() => {
+    if (!storageKey) return;
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const saved = localStorage.getItem(storageKey);
       if (saved) {
         const parsed: Conversation[] = JSON.parse(saved);
         if (parsed.length > 0) {
@@ -322,16 +446,16 @@ export default function Home() {
     setConversations([fresh]);
     setActiveId(fresh.id);
     setInitializing(false);
-  }, []);
+  }, [storageKey]);
 
   useEffect(() => {
-    if (conversations.length === 0) return;
+    if (!storageKey || conversations.length === 0) return;
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations));
+      localStorage.setItem(storageKey, JSON.stringify(conversations));
     } catch {
       // storage penuh/tidak tersedia
     }
-  }, [conversations]);
+  }, [conversations, storageKey]);
 
   const activeConversation = conversations.find((c) => c.id === activeId) ?? null;
 
@@ -455,10 +579,14 @@ export default function Home() {
     setLoading(true);
     try {
       const historyToSend = toGroqHistory(updatedMessages.slice(-MAX_HISTORY_MESSAGES));
+      const idToken = user ? await user.getIdToken() : null;
 
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}),
+        },
         body: JSON.stringify({ messages: historyToSend }),
       });
 
@@ -558,7 +686,7 @@ export default function Home() {
     if (e.key === "Enter") sendMessage();
   }
 
-  if (initializing || !activeConversation) {
+  if (authLoading || !user || initializing || !activeConversation) {
     return (
       <div className="splash-screen">
         <span className="splash-emoji">🌸</span>
@@ -597,6 +725,22 @@ export default function Home() {
             </div>
           ))}
         </div>
+        <div className="sidebar-footer">
+          <span className="sidebar-user-email" title={user.email ?? ""}>
+            {user.email}
+          </span>
+          <button
+            className="sidebar-logout-btn"
+            onClick={async () => {
+              await logout();
+              router.push("/login");
+            }}
+            aria-label="Keluar"
+            title="Keluar"
+          >
+            <LogoutIcon />
+          </button>
+        </div>
       </aside>
 
       <div className="chat-main">
@@ -613,6 +757,14 @@ export default function Home() {
             <h1 style={{ margin: 0, fontSize: "1.15rem" }}>Misha AI</h1>
             <p style={{ margin: 0, fontSize: "0.75rem" }}>Powered by Groq + Tavily</p>
           </div>
+          <button
+            className="theme-toggle-btn"
+            onClick={toggleTheme}
+            aria-label={theme === "light" ? "Ganti ke dark mode" : "Ganti ke light mode"}
+            title={theme === "light" ? "Dark mode" : "Light mode"}
+          >
+            {theme === "light" ? <MoonIcon /> : <SunIcon />}
+          </button>
         </header>
 
         <div className="chat-scroll">
@@ -631,8 +783,10 @@ export default function Home() {
                       autoFocus
                     />
                     <div className="bubble-edit-actions">
-                      <button className="btn-ghost" onClick={handleCancelEdit}> Batal </button>
-                     <button className="btn" onClick={() => handleSaveEdit(i)}>
+                      <button className="btn-ghost" onClick={handleCancelEdit}>
+                        Batal
+                      </button>
+                      <button className="btn" onClick={() => handleSaveEdit(i)}>
                         Kirim ulang
                       </button>
                     </div>
@@ -788,12 +942,25 @@ export default function Home() {
                 )}
               </div>
 
+              {speechSupported && (
+                <button
+                  className={`mic-btn ${isListening ? "mic-btn-active" : ""}`}
+                  onClick={toggleVoiceInput}
+                  aria-label={isListening ? "Berhenti merekam" : "Input suara"}
+                  title={isListening ? "Berhenti merekam" : "Input suara"}
+                  disabled={loading}
+                  type="button"
+                >
+                  <MicIcon />
+                </button>
+              )}
+
               <div className="chat-input-field-wrap">
                 <input
                   value={input}
                   onChange={(e) => setInput(e.target.value.slice(0, MAX_INPUT_CHARS))}
                   onKeyDown={handleKeyDown}
-                  placeholder="Tanyakan apa saja..."
+                  placeholder={isListening ? "Mendengarkan..." : "Tanyakan apa saja..."}
                   disabled={loading}
                   maxLength={MAX_INPUT_CHARS}
                 />
@@ -816,4 +983,4 @@ export default function Home() {
       </div>
     </div>
   );
-} 
+}
