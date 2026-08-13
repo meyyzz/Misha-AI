@@ -210,6 +210,23 @@ export async function POST(req: NextRequest) {
     const lastMessage = messages[messages.length - 1];
     const hasImage = lastMessage ? messageHasImage(lastMessage) : false;
 
+    // ===== IMAGE GENERATION =====
+const lastUserMessage = [...messages]
+  .reverse()
+  .find((m) => m.role === "user");
+
+const userText = lastUserMessage
+  ? extractText(lastUserMessage).trim()
+  : "";
+
+const wantsImage =
+  !hasImage &&
+  /^(buat|buatkan|bikin|generate|create|gambarkan|gambarkanlah)\b.*\b(gambar|image|ilustrasi|illustration|foto|photo)\b/i.test(
+    userText
+  ) ||
+  !hasImage &&
+  /^(gambar|image)\s+/i.test(userText);
+
     let searchResults: TavilyResult[] = [];
     let searchContext: ChatMessage | null = null;
 
@@ -225,6 +242,17 @@ export async function POST(req: NextRequest) {
       }
       searchContext = buildContextMessage(searchResults);
     }
+    // Jika user meminta gambar, langsung arahkan ke Pollinations
+if (wantsImage) {
+  const imageUrl =
+    `/api/generate-image?prompt=${encodeURIComponent(userText)}`;
+
+  return NextResponse.json({
+    answer: "✨ Ini gambar yang kamu minta!",
+    image: imageUrl,
+    sources: [],
+  });
+}
 
     const groqMessages = buildGroqMessages(messages, searchContext);
     const model = hasImage ? VISION_MODEL : TEXT_MODEL;

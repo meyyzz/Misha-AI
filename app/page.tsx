@@ -349,6 +349,11 @@ export default function Home() {
   const recognitionRef = useRef<any>(null);
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(true);
+  // ===== IMAGE GENERATOR =====
+const [imagePrompt, setImagePrompt] = useState("");
+const [generatedImage, setGeneratedImage] = useState("");
+const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+const [imageError, setImageError] = useState("");
 
   // Redirect ke /login kalau belum login
   useEffect(() => {
@@ -423,6 +428,46 @@ export default function Home() {
       }
     }
   }
+  // ===== GENERATE IMAGE =====
+async function generateImage() {
+  if (!imagePrompt.trim()) {
+    setImageError("Tulis prompt gambar dulu.");
+    return;
+  }
+
+  setIsGeneratingImage(true);
+  setGeneratedImage("");
+  setImageError("");
+
+  try {
+    const response = await fetch(
+      `/api/generate-image?prompt=${encodeURIComponent(imagePrompt)}`
+    );
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+
+      throw new Error(
+        data?.error || "Gagal membuat gambar."
+      );
+    }
+
+    const blob = await response.blob();
+    const imageUrl = URL.createObjectURL(blob);
+
+    setGeneratedImage(imageUrl);
+  } catch (error) {
+    console.error("Generate image error:", error);
+
+    setImageError(
+      error instanceof Error
+        ? error.message
+        : "Gagal membuat gambar."
+    );
+  } finally {
+    setIsGeneratingImage(false);
+  }
+}
 
   const storageKey = user ? `${STORAGE_KEY}-${user.uid}` : null;
 
@@ -593,8 +638,16 @@ export default function Home() {
       const data = await res.json();
 
       const assistantMessage: Message = !res.ok
-        ? { role: "assistant", content: `⚠️ Error: ${data.error ?? "Terjadi kesalahan."}` }
-        : { role: "assistant", content: data.answer, sources: data.sources };
+  ? {
+      role: "assistant",
+      content: `⚠️ Error: ${data.error ?? "Terjadi kesalahan."}`,
+    }
+  : {
+      role: "assistant",
+      content: data.answer,
+      image: data.image,
+      sources: data.sources,
+    };
 
       updateConversationMessages(conversationId, [...updatedMessages, assistantMessage]);
     } catch {
@@ -803,6 +856,7 @@ export default function Home() {
                         </div>
                       )}
                       {m.role === "assistant" ? <MarkdownContent text={m.content} /> : m.content}
+                      
 
                       {m.sources && m.sources.length > 0 && (
                         <div className="bubble-sources-toggle-wrap">
